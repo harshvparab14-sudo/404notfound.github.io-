@@ -1,0 +1,2370 @@
+================================================================================
+FILE: resume-portfolio-site/.gitignore
+================================================================================
+
+.DS_Store
+node_modules/
+
+
+================================================================================
+FILE: resume-portfolio-site/README.md
+================================================================================
+
+# Portfolio, Unfolded
+
+A front-end-only implementation of **Problem Statement 02 — "Escape the PDF Prison"**
+(GNKC Inter-Collegiate Hackathon 2026): turn a resume into a shareable, editable
+portfolio site. Pure HTML/CSS/JavaScript — no build step, no framework, no server —
+so it can be pushed straight to GitHub and hosted on **GitHub Pages**.
+
+## What's in here
+
+```
+index.html        Landing page
+signup.html       Create account
+login.html        Log in
+dashboard.html    Status overview + links to each step
+upload.html       Drop in a resume PDF, watch it get parsed
+editor.html       Review/edit every section, pick a layout, publish
+portfolio.html    The public, published portfolio (reads ?u=<slug>)
+css/style.css     Everything's styling
+js/storage.js     The "database" — all data lives in localStorage
+js/auth.js        Sign up / log in logic
+js/upload.js      Client-side PDF text extraction + section parser
+js/editor.js      Add/remove/reorder sections, skills, templates, publish
+js/portfolio.js   Renders a published (or preview) portfolio
+js/nav.js         Mobile nav toggle + logged-in/out nav state
+```
+
+## Running it locally
+
+No build step needed. From this folder:
+
+```bash
+python3 -m http.server 8080
+```
+
+Then open `http://localhost:8080`. (Opening `index.html` directly via
+`file://` also mostly works, but some browsers restrict `fetch`/module
+loading over `file://` — a local server is safer.)
+
+## Putting it on GitHub Pages
+
+1. Create a new repository on GitHub and push this folder to it:
+   ```bash
+   git init
+   git add .
+   git commit -m "Initial commit"
+   git branch -M main
+   git remote add origin https://github.com/<you>/<repo>.git
+   git push -u origin main
+   ```
+2. In the repo, go to **Settings → Pages**.
+3. Under **Build and deployment**, set **Source** to "Deploy from a branch",
+   branch `main`, folder `/ (root)`.
+4. Save. GitHub gives you a URL like `https://<you>.github.io/<repo>/` —
+   that's your live site.
+
+You can do all of this from **GitHub Desktop** too: open this folder as a
+local repository, commit, publish the repository, then turn on Pages from
+the repo's Settings page in your browser.
+
+## How the "extraction" actually works
+
+Feature #2 in the brief ("resume upload and structured information
+extraction") is implemented for real, not mocked: `upload.html` loads
+**pdf.js** from a CDN and reads the PDF's text directly in the browser
+(nothing is uploaded anywhere). `js/upload.js` then runs a small heuristic
+parser — it looks for lines that look like section headers ("Education",
+"Experience", "Projects", "Skills", "Achievements"), groups the lines under
+each one, and tries to split entries apart using date ranges (e.g. "2019 –
+2023"). Heuristic parsing of arbitrary resume layouts is never perfect,
+which is exactly why the next step is the editor: everything extracted is
+fully editable, addable, and removable before anything is published.
+Non-PDF files currently fall back to a blank/manual entry, since accurate
+DOCX parsing needs another library.
+
+## Important limitation: this is a front-end-only demo
+
+There's no backend and no real database — `js/storage.js` uses the
+browser's `localStorage` to stand in for one. That means:
+
+- **Accounts are mock accounts.** Signing up stores name/email/password in
+  plain text in your own browser's localStorage. This is fine for a demo
+  or a hackathon judge to click through, but it is **not real
+  authentication** — don't point real users at it as-is.
+- **Published links only resolve in the same browser that published
+  them.** A "unique shareable public link" (feature #8) needs a real
+  database so any device can look up a slug and get the same data back.
+  Right now, `portfolio.html?u=<slug>` reads from that browser's
+  localStorage, so if you email the link to someone else, they'll see a
+  "nothing published here yet" message on their own device.
+
+### The upgrade path
+
+Every page only ever talks to the functions in `js/storage.js`
+(`saveUser`, `findUser`, `getDraft`, `saveDraft`, `publish`, `getPublished`,
+etc.) — nothing else touches `localStorage` directly. To make this a real
+multi-device product, that's the one file to change: swap those functions
+for calls to a real backend, for example:
+
+- **Firebase** (Auth + Firestore) — fastest to wire up, no server to run,
+  works fine from a static GitHub Pages site.
+- **Supabase** — same idea, Postgres-backed.
+- **Your own small API** (Node/Express, etc.) — most control, but you'd
+  need to host it somewhere other than GitHub Pages (which only serves
+  static files).
+
+## Brownie-point features already included
+
+- **Portfolio completeness meter** — the "Layout & publish" tab in the
+  editor scores how filled-out the draft is.
+- **Template switching without data loss** — the three layouts (Modern,
+  Mono, Timeline) all read from the same underlying data, so switching is
+  instant and nothing is re-entered.
+
+Not yet built (left for a next pass, once a backend exists): AI-generated
+bios/summaries, content-quality suggestions, visit analytics, and
+export/download of the finished portfolio.
+
+
+================================================================================
+FILE: resume-portfolio-site/css/style.css
+================================================================================
+
+/* ============================================================
+   RESUME → PORTFOLIO — design tokens
+   Concept: a resume page peeling open to reveal a living
+   portfolio. Ink-dark ground, kraft-paper cards, highlighter
+   accent (marking up your own resume).
+   ============================================================ */
+
+:root {
+  /* color */
+  --ink:        #12141b;
+  --ink-soft:   #1a1d27;
+  --ink-line:   #2a2e3a;
+  --paper:      #f2ead4;
+  --paper-dim:  #e7ddc0;
+  --paper-text: #1c1a14;
+  --highlight:  #ffc857;
+  --highlight-2:#ff9f57;
+  --signal:     #58d6b9;
+  --text-hi:    #f6f3ea;
+  --text-mid:   #b7b3a6;
+  --text-dim:   #7c7b78;
+  --danger:     #ff6b6b;
+
+  /* type */
+  --font-display: "Fraunces", Georgia, serif;
+  --font-body: "Space Grotesk", "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", "Courier New", monospace;
+
+  /* layout */
+  --max: 1120px;
+  --radius: 14px;
+  --radius-sm: 8px;
+  --shadow-card: 0 20px 50px -20px rgba(0,0,0,0.55);
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  * { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+}
+
+body {
+  margin: 0;
+  background: var(--ink);
+  color: var(--text-hi);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: inherit; text-decoration: none; }
+img { max-width: 100%; display: block; }
+ul { margin: 0; padding: 0; list-style: none; }
+button { font-family: inherit; cursor: pointer; }
+
+:focus-visible {
+  outline: 2px solid var(--highlight);
+  outline-offset: 3px;
+}
+
+.wrap {
+  max-width: var(--max);
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--signal);
+}
+
+.field-tag {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  margin: 0;
+  color: var(--text-hi);
+}
+
+p { color: var(--text-mid); margin: 0; }
+
+/* ---------------- nav ---------------- */
+.site-nav {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: rgba(18,20,27,0.86);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--ink-line);
+}
+.site-nav .wrap {
+  height: 68px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-hi);
+}
+.brand .fold {
+  width: 20px; height: 20px;
+  background: linear-gradient(135deg, var(--paper) 0 60%, var(--ink) 61% 61%, transparent 62%);
+  border-radius: 3px;
+  transform: rotate(-4deg);
+}
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  font-size: 14.5px;
+  color: var(--text-mid);
+}
+.nav-links a:hover { color: var(--text-hi); }
+.nav-links a.active { color: var(--highlight); }
+.nav-cta { display: flex; gap: 12px; align-items: center; }
+.nav-toggle {
+  display: none;
+  background: none; border: 1px solid var(--ink-line); color: var(--text-hi);
+  width: 40px; height: 40px; border-radius: var(--radius-sm);
+}
+
+@media (max-width: 800px) {
+  .nav-links { display: none; }
+  .nav-toggle { display: block; }
+  .site-nav.open .nav-links {
+    display: flex;
+    flex-direction: column;
+    position: absolute;
+    top: 68px; left: 0; right: 0;
+    background: var(--ink-soft);
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--ink-line);
+    gap: 18px;
+  }
+}
+
+/* ---------------- buttons ---------------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 22px;
+  border-radius: 999px;
+  font-size: 14.5px;
+  font-weight: 600;
+  border: 1px solid transparent;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+  white-space: nowrap;
+}
+.btn:active { transform: translateY(1px); }
+.btn-primary {
+  background: var(--highlight);
+  color: #241c05;
+}
+.btn-primary:hover { box-shadow: 0 10px 24px -8px rgba(255,200,87,0.55); }
+.btn-ghost {
+  background: transparent;
+  border-color: var(--ink-line);
+  color: var(--text-hi);
+}
+.btn-ghost:hover { border-color: var(--text-mid); }
+.btn-signal {
+  background: var(--signal);
+  color: #06231c;
+}
+.btn-signal:hover { box-shadow: 0 10px 24px -8px rgba(88,214,185,0.5); }
+.btn-danger-ghost {
+  background: transparent; border-color: var(--ink-line); color: var(--danger);
+}
+.btn-sm { padding: 8px 14px; font-size: 13px; }
+.btn-block { width: 100%; }
+.btn[disabled] { opacity: 0.5; cursor: not-allowed; }
+
+.icon-btn {
+  width: 34px; height: 34px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-sm);
+  background: var(--ink-soft);
+  border: 1px solid var(--ink-line);
+  color: var(--text-mid);
+}
+.icon-btn:hover { color: var(--text-hi); border-color: var(--text-mid); }
+
+/* ---------------- hero (index page) ---------------- */
+.hero {
+  padding: 84px 0 100px;
+  position: relative;
+  overflow: hidden;
+}
+.hero .wrap {
+  display: grid;
+  grid-template-columns: 1.05fr 0.95fr;
+  gap: 56px;
+  align-items: center;
+}
+.hero h1 {
+  font-size: clamp(38px, 5vw, 64px);
+  line-height: 1.04;
+  letter-spacing: -0.01em;
+}
+.hero h1 em {
+  font-style: italic;
+  color: var(--highlight);
+}
+.hero p.lede {
+  margin-top: 20px;
+  font-size: 18px;
+  max-width: 46ch;
+  color: var(--text-mid);
+}
+.hero-actions { margin-top: 32px; display: flex; gap: 14px; flex-wrap: wrap; }
+.hero-meta {
+  margin-top: 40px;
+  display: flex;
+  gap: 28px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+.hero-meta b { color: var(--text-hi); font-family: var(--font-body); font-size: 15px; display: block; }
+
+/* signature: peeling resume -> portfolio */
+.peel-stage {
+  position: relative;
+  height: 420px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.peel-card {
+  position: absolute;
+  width: 300px;
+  height: 380px;
+  border-radius: 10px;
+  box-shadow: var(--shadow-card);
+}
+.peel-back {
+  background:
+    linear-gradient(160deg, #1d3a34, #14212a 55%, #241a2f);
+  transform: rotate(4deg) translate(18px, 10px);
+  padding: 26px;
+  color: var(--text-hi);
+}
+.peel-back .tag { font-family: var(--font-mono); font-size: 11px; color: var(--signal); letter-spacing: .08em; }
+.peel-back h3 { font-size: 22px; margin-top: 10px; }
+.peel-back .bar { height: 8px; border-radius: 4px; background: rgba(255,255,255,0.12); margin-top: 16px; }
+.peel-back .bar.w1 { width: 80%; } .peel-back .bar.w2 { width: 55%; } .peel-back .bar.w3 { width: 65%; }
+.peel-back .chips { display: flex; gap: 8px; margin-top: 22px; flex-wrap: wrap; }
+.peel-back .chip { font-family: var(--font-mono); font-size: 10.5px; padding: 5px 10px; border-radius: 999px; background: rgba(88,214,185,0.16); color: var(--signal); }
+
+.peel-front {
+  background: var(--paper);
+  color: var(--paper-text);
+  transform: rotate(-6deg) translate(-14px, -6px);
+  padding: 26px;
+  font-family: var(--font-mono);
+  animation: peel 6s ease-in-out infinite;
+  clip-path: polygon(0 0, 82% 0, 100% 18%, 100% 100%, 0 100%);
+}
+.peel-front::after {
+  content: "";
+  position: absolute;
+  top: 0; right: 0;
+  width: 0; height: 0;
+  border-style: solid;
+  border-width: 0 0 44px 44px;
+  border-color: transparent transparent var(--ink) transparent;
+  filter: drop-shadow(-2px 2px 3px rgba(0,0,0,0.25));
+}
+.peel-front .name { font-family: var(--font-display); font-size: 20px; font-weight: 600; }
+.peel-front .role { font-size: 11px; color: #6b5a2f; margin-top: 2px; }
+.peel-front .rule { height: 1px; background: rgba(0,0,0,0.15); margin: 16px 0; }
+.peel-front .line { height: 7px; background: rgba(0,0,0,0.13); border-radius: 2px; margin-bottom: 8px; }
+.peel-front .line.w1{width:90%;} .peel-front .line.w2{width:70%;} .peel-front .line.w3{width:80%;} .peel-front .line.w4{width:50%;}
+
+@keyframes peel {
+  0%, 100% { transform: rotate(-6deg) translate(-14px, -6px); }
+  50% { transform: rotate(-11deg) translate(-26px, -14px); }
+}
+
+/* ---------------- sections ---------------- */
+.section { padding: 88px 0; border-top: 1px solid var(--ink-line); }
+.section-head { max-width: 640px; margin-bottom: 48px; }
+.section-head h2 { font-size: clamp(28px, 3.4vw, 40px); margin-top: 12px; }
+.section-head p { margin-top: 14px; font-size: 16.5px; }
+
+.feature-list {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1px;
+  background: var(--ink-line);
+  border: 1px solid var(--ink-line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.feature-row {
+  background: var(--ink);
+  padding: 22px 26px;
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+.feature-row .field-tag { flex-shrink: 0; padding-top: 3px; width: 74px; }
+.feature-row h4 { font-size: 16.5px; font-family: var(--font-body); font-weight: 600; }
+.feature-row p { margin-top: 4px; font-size: 14.5px; }
+@media (max-width: 760px) { .feature-list { grid-template-columns: 1fr; } }
+
+.flow-steps {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 18px;
+}
+.flow-step {
+  background: var(--ink-soft);
+  border: 1px solid var(--ink-line);
+  border-radius: var(--radius);
+  padding: 24px;
+}
+.flow-step .field-tag { color: var(--highlight); }
+.flow-step h4 { margin-top: 10px; font-size: 17px; }
+.flow-step p { margin-top: 6px; font-size: 14px; }
+@media (max-width: 900px) { .flow-steps { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 560px) { .flow-steps { grid-template-columns: 1fr; } }
+
+.bonus-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+.bonus-card {
+  background: var(--ink-soft);
+  border: 1px solid var(--ink-line);
+  border-radius: var(--radius);
+  padding: 20px;
+  font-size: 14px;
+}
+.bonus-card .field-tag { display: block; margin-bottom: 8px; }
+@media (max-width: 860px) { .bonus-grid { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 560px) { .bonus-grid { grid-template-columns: 1fr; } }
+
+.cta-band {
+  border-radius: 20px;
+  background: linear-gradient(135deg, var(--ink-soft), var(--ink));
+  border: 1px solid var(--ink-line);
+  padding: 56px;
+  text-align: center;
+}
+.cta-band h2 { font-size: clamp(26px, 3vw, 34px); }
+.cta-band p { margin-top: 12px; }
+.cta-band .hero-actions { justify-content: center; margin-top: 28px; }
+
+.site-footer {
+  border-top: 1px solid var(--ink-line);
+  padding: 32px 0;
+  font-size: 13px;
+  color: var(--text-dim);
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+/* ---------------- auth pages ---------------- */
+.auth-shell {
+  min-height: calc(100vh - 69px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+}
+.auth-card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--ink-soft);
+  border: 1px solid var(--ink-line);
+  border-radius: var(--radius);
+  padding: 40px;
+  box-shadow: var(--shadow-card);
+}
+.auth-card h2 { font-size: 26px; }
+.auth-card > p { margin-top: 8px; font-size: 14.5px; }
+.auth-card form { margin-top: 28px; }
+
+.field { margin-bottom: 18px; }
+.field label {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 7px;
+}
+.field input,
+.field textarea,
+.field select {
+  width: 100%;
+  background: var(--ink);
+  border: 1px solid var(--ink-line);
+  border-radius: var(--radius-sm);
+  padding: 11px 13px;
+  color: var(--text-hi);
+  font-family: var(--font-body);
+  font-size: 14.5px;
+  transition: border-color 0.15s ease;
+}
+.field input:focus, .field textarea:focus, .field select:focus {
+  border-color: var(--highlight);
+  outline: none;
+}
+.field textarea { resize: vertical; min-height: 80px; }
+.field-hint { font-size: 12.5px; color: var(--text-dim); margin-top: 6px; }
+.form-error {
+  background: rgba(255,107,107,0.1);
+  border: 1px solid rgba(255,107,107,0.35);
+  color: #ffb3b3;
+  font-size: 13.5px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  margin-bottom: 18px;
+  display: none;
+}
+.form-error.show { display: block; }
+.auth-switch { margin-top: 22px; font-size: 14px; color: var(--text-mid); text-align: center; }
+.auth-switch a { color: var(--highlight); font-weight: 600; }
+
+/* ---------------- app shell (dashboard/upload/editor) ---------------- */
+.app-shell { min-height: calc(100vh - 69px); padding: 48px 0 80px; }
+.app-head { display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 16px; margin-bottom: 36px; }
+.app-head h1 { font-size: clamp(26px, 3vw, 34px); }
+.app-head p { margin-top: 8px; }
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+  margin-bottom: 40px;
+}
+.status-card {
+  background: var(--ink-soft);
+  border: 1px solid var(--ink-line);
+  border-radius: var(--radius);
+  padding: 22px;
+}
+.status-card .field-tag { color: var(--signal); }
+.status-card h3 { font-size: 19px; margin-top: 10px; }
+.status-card p { font-size: 13.5px; margin-top: 6px; }
+.status-card .btn { margin-top: 16px; }
+@media (max-width: 820px) { .status-grid { grid-template-columns: 1fr; } }
+
+.dash-links { background: var(--ink-soft); border: 1px solid var(--ink-line); border-radius: var(--radius); padding: 26px; }
+.dash-link-row { display: flex; justify-content: space-between; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--ink-line); }
+.dash-link-row:last-child { border-bottom: none; }
+.dash-link-row .name { font-weight: 600; }
+.dash-link-row .field-tag { display: block; margin-top: 3px; }
+
+/* upload */
+.uploader {
+  border: 2px dashed var(--ink-line);
+  border-radius: var(--radius);
+  padding: 60px 30px;
+  text-align: center;
+  background: var(--ink-soft);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.uploader.drag { border-color: var(--highlight); background: rgba(255,200,87,0.06); }
+.uploader input[type=file] { display: none; }
+.uploader .doc-icon {
+  width: 64px; height: 78px; margin: 0 auto 20px;
+  background: var(--paper);
+  border-radius: 6px;
+  position: relative;
+  clip-path: polygon(0 0, 74% 0, 100% 26%, 100% 100%, 0 100%);
+}
+.uploader h3 { font-size: 19px; margin-top: 4px; }
+.uploader p { margin-top: 8px; font-size: 14px; }
+.uploader .btn { margin-top: 20px; }
+
+.parse-log {
+  margin-top: 26px;
+  background: var(--ink);
+  border: 1px solid var(--ink-line);
+  border-radius: var(--radius-sm);
+  padding: 18px 20px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--signal);
+  display: none;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.parse-log.show { display: block; }
+.parse-log div { padding: 3px 0; color: var(--text-mid); }
+.parse-log div.ok { color: var(--signal); }
+.parse-log div.warn { color: var(--highlight); }
+
+.progress-bar { height: 6px; border-radius: 3px; background: var(--ink-line); overflow: hidden; margin-top: 22px; display: none; }
+.progress-bar.show { display: block; }
+.progress-bar > i { display: block; height: 100%; width: 0%; background: var(--highlight); transition: width 0.25s ease; }
+
+/* editor */
+.editor-layout { display: grid; grid-template-columns: 260px 1fr; gap: 32px; align-items: start; }
+.editor-side {
+  position: sticky; top: 88px;
+  background: var(--ink-soft);
+  border: 1px solid var(--ink-line);
+  border-radius: var(--radius);
+  padding: 18px;
+}
+.editor-side button {
+  width: 100%; text-align: left;
+  background: none; border: none; color: var(--text-mid);
+  padding: 11px 12px; border-radius: var(--radius-sm);
+  font-size: 14px; font-family: var(--font-mono);
+  display: flex; justify-content: space-between; align-items: center;
+}
+.editor-side button.active { background: var(--ink); color: var(--highlight); }
+.editor-side button:hover { color: var(--text-hi); }
+.editor-side .count { font-size: 11px; color: var(--text-dim); }
+
+.editor-panel {
+  background: var(--ink-soft);
+  border: 1px solid var(--ink-line);
+  border-radius: var(--radius);
+  padding: 30px;
+}
+.panel-section { display: none; }
+.panel-section.active { display: block; }
+.panel-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 22px; }
+.panel-head h2 { font-size: 21px; }
+.panel-head p { font-size: 13.5px; margin-top: 4px; }
+
+.entry-card {
+  background: var(--ink);
+  border: 1px solid var(--ink-line);
+  border-radius: var(--radius-sm);
+  padding: 20px;
+  margin-bottom: 16px;
+}
+.entry-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+.entry-head .field-tag { color: var(--highlight); }
+.entry-actions { display: flex; gap: 6px; }
+.entry-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 640px) { .entry-row { grid-template-columns: 1fr; } }
+
+.skill-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.skill-tag {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--ink); border: 1px solid var(--ink-line);
+  padding: 7px 8px 7px 14px; border-radius: 999px;
+  font-family: var(--font-mono); font-size: 12.5px;
+}
+.skill-tag button { background: none; border: none; color: var(--text-dim); width: 18px; height: 18px; border-radius: 50%; }
+.skill-tag button:hover { color: var(--danger); }
+
+.template-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 8px; }
+.template-card {
+  border: 2px solid var(--ink-line);
+  border-radius: var(--radius-sm);
+  padding: 16px;
+  background: var(--ink);
+  cursor: pointer;
+}
+.template-card.selected { border-color: var(--highlight); }
+.template-card .swatch { height: 90px; border-radius: 6px; margin-bottom: 10px; }
+.template-card h4 { font-size: 14px; font-family: var(--font-body); }
+.template-card p { font-size: 12px; margin-top: 3px; }
+.swatch.modern { background: linear-gradient(135deg,#1d3a34,#14212a); }
+.swatch.mono { background: repeating-linear-gradient(180deg, #1a1d27 0 8px, #22242f 8px 16px); }
+.swatch.timeline { background: linear-gradient(90deg, #241a2f, #1d3a34); }
+@media (max-width: 640px) { .template-grid { grid-template-columns: 1fr; } }
+
+.panel-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 30px; padding-top: 22px; border-top: 1px solid var(--ink-line); flex-wrap: wrap; gap: 14px; }
+.save-note { font-family: var(--font-mono); font-size: 12px; color: var(--text-dim); }
+.save-note.saved { color: var(--signal); }
+
+.publish-box {
+  margin-top: 20px;
+  background: var(--ink);
+  border: 1px solid var(--ink-line);
+  border-radius: var(--radius-sm);
+  padding: 18px 20px;
+  display: none;
+}
+.publish-box.show { display: block; }
+.publish-box .link-row { display: flex; gap: 10px; margin-top: 12px; }
+.publish-box input { flex: 1; background: var(--ink-soft); border: 1px solid var(--ink-line); border-radius: var(--radius-sm); padding: 10px 12px; color: var(--signal); font-family: var(--font-mono); font-size: 13px; }
+
+/* ---------------- public portfolio ---------------- */
+.pf-page { background: var(--paper); color: var(--paper-text); min-height: 100vh; }
+.pf-wrap { max-width: 880px; margin: 0 auto; padding: 60px 24px 100px; }
+.pf-header { margin-bottom: 48px; }
+.pf-header .field-tag { color: #8a7a44; }
+.pf-header h1 { font-size: clamp(32px,5vw,48px); color: var(--paper-text); margin-top: 10px; }
+.pf-header .role { font-size: 18px; color: #5a5540; margin-top: 6px; }
+.pf-header .bio { margin-top: 18px; font-size: 15.5px; color: #4a4636; max-width: 62ch; }
+.pf-links { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 20px; }
+.pf-links a { font-family: var(--font-mono); font-size: 12.5px; padding: 8px 14px; border: 1px solid rgba(0,0,0,0.2); border-radius: 999px; color: #3a3626; }
+.pf-links a:hover { background: rgba(0,0,0,0.06); }
+
+.pf-section { margin-top: 44px; }
+.pf-section .field-tag { color: #8a7a44; margin-bottom: 14px; display: block; }
+.pf-section h2 { font-size: 22px; color: var(--paper-text); margin-bottom: 18px; }
+.pf-item { padding: 16px 0; border-top: 1px solid rgba(0,0,0,0.12); }
+.pf-item:first-child { border-top: none; }
+.pf-item-top { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.pf-item h3 { font-size: 16.5px; color: var(--paper-text); font-family: var(--font-body); font-weight: 600; }
+.pf-item .sub { font-size: 13.5px; color: #6b6448; }
+.pf-item .when { font-family: var(--font-mono); font-size: 11.5px; color: #8a7a44; white-space: nowrap; }
+.pf-item p { margin-top: 6px; font-size: 14px; color: #4a4636; }
+.pf-skill-tags { display: flex; flex-wrap: wrap; gap: 8px; }
+.pf-skill-tags span { font-family: var(--font-mono); font-size: 12px; padding: 6px 12px; border-radius: 999px; background: rgba(0,0,0,0.07); color: #3a3626; }
+.pf-empty { padding: 80px 20px; text-align: center; }
+.pf-footer { margin-top: 60px; padding-top: 24px; border-top: 1px solid rgba(0,0,0,0.15); font-family: var(--font-mono); font-size: 11.5px; color: #8a7a44; text-align: center; }
+
+/* mono template variant */
+.pf-page.tpl-mono { background: #14161d; color: #d8d4c4; }
+.pf-page.tpl-mono .pf-header h1, .pf-page.tpl-mono .pf-item h3, .pf-page.tpl-mono .pf-section h2 { color: #f2ead4; font-family: var(--font-mono); }
+.pf-page.tpl-mono .pf-header .role { color: var(--highlight); }
+.pf-page.tpl-mono .pf-header .bio, .pf-page.tpl-mono .pf-item p { color: #a8a48f; }
+.pf-page.tpl-mono .pf-item { border-top-color: rgba(255,255,255,0.1); }
+.pf-page.tpl-mono .pf-links a { border-color: rgba(255,255,255,0.2); color: #d8d4c4; }
+.pf-page.tpl-mono .pf-skill-tags span { background: rgba(255,255,255,0.08); color: #d8d4c4; }
+.pf-page.tpl-mono .pf-footer, .pf-page.tpl-mono .pf-item .when, .pf-page.tpl-mono .pf-section .field-tag, .pf-page.tpl-mono .pf-header .field-tag { color: #58d6b9; }
+.pf-page.tpl-mono .pf-item .sub { color: #8f8b78; }
+
+/* timeline template variant */
+.pf-page.tpl-timeline .pf-section .pf-item { position: relative; padding-left: 26px; }
+.pf-page.tpl-timeline .pf-section .pf-item::before { content:""; position:absolute; left:4px; top:22px; width:9px; height:9px; border-radius:50%; background: var(--highlight-2); }
+.pf-page.tpl-timeline .pf-section .pf-item::after { content:""; position:absolute; left:8px; top:31px; bottom:0; width:1px; background: rgba(0,0,0,0.15); }
+.pf-page.tpl-timeline .pf-section .pf-item:last-child::after { display:none; }
+
+/* utility */
+.hidden { display: none !important; }
+.mt-8 { margin-top: 8px; } .mt-16 { margin-top: 16px; } .mt-24 { margin-top: 24px; }
+
+
+================================================================================
+FILE: resume-portfolio-site/dashboard.html
+================================================================================
+
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Dashboard — Portfolio, Unfolded</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;0,600;1,500&family=Space+Grotesk:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="wrap">
+    <a href="index.html" class="brand"><span class="fold"></span>Portfolio, Unfolded</a>
+    <div class="nav-links">
+      <a href="dashboard.html">Dashboard</a>
+      <a href="upload.html">Upload</a>
+      <a href="editor.html">Editor</a>
+    </div>
+    <div class="nav-cta"><button class="btn btn-ghost btn-sm" data-logout>Log out</button></div>
+    <button class="nav-toggle" aria-label="Toggle menu">☰</button>
+  </div>
+</nav>
+
+<main class="app-shell">
+  <div class="wrap">
+    <div class="app-head">
+      <div>
+        <p class="eyebrow" id="greeting">FIELD_ACCT — WELCOME</p>
+        <h1 id="userName">Your dashboard</h1>
+        <p>Track where your portfolio is and jump back into any step.</p>
+      </div>
+    </div>
+
+    <div class="status-grid">
+      <div class="status-card">
+        <p class="field-tag">STEP_01</p>
+        <h3 id="uploadStatus">No resume uploaded yet</h3>
+        <p id="uploadSub">Start by uploading the resume you already have.</p>
+        <a href="upload.html" class="btn btn-signal btn-sm">Upload resume →</a>
+      </div>
+      <div class="status-card">
+        <p class="field-tag">STEP_02–03</p>
+        <h3 id="editStatus">Draft empty</h3>
+        <p id="editSub">Review and edit what gets extracted.</p>
+        <a href="editor.html" class="btn btn-ghost btn-sm">Open editor →</a>
+      </div>
+      <div class="status-card">
+        <p class="field-tag">STEP_04</p>
+        <h3 id="publishStatus">Not published</h3>
+        <p id="publishSub">Publish once your sections look right.</p>
+        <a href="#" id="viewLiveBtn" class="btn btn-ghost btn-sm hidden">View live site →</a>
+      </div>
+    </div>
+
+    <div class="dash-links">
+      <div class="dash-link-row">
+        <div><div class="name">Upload a resume</div><span class="field-tag">Reads a PDF in your browser and pre-fills your draft</span></div>
+        <a href="upload.html" class="btn btn-ghost btn-sm">Open</a>
+      </div>
+      <div class="dash-link-row">
+        <div><div class="name">Edit your sections</div><span class="field-tag">Education, experience, projects, skills, achievements, links</span></div>
+        <a href="editor.html" class="btn btn-ghost btn-sm">Open</a>
+      </div>
+      <div class="dash-link-row">
+        <div><div class="name">Published site</div><span class="field-tag" id="dashSlugLine">Not published yet</span></div>
+        <a href="#" id="dashViewBtn" class="btn btn-ghost btn-sm hidden">View</a>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script src="js/storage.js"></script>
+<script src="js/nav.js"></script>
+<script>
+  const user = DB.requireAuth();
+  if (user) {
+    document.getElementById("userName").textContent = `Hi, ${user.name.split(" ")[0]}`;
+    const draft = DB.getDraft(user.email);
+
+    const hasContent = draft.personal.name || draft.education.length || draft.experience.length || draft.projects.length;
+    if (hasContent) {
+      document.getElementById("uploadStatus").textContent = "Resume extracted";
+      document.getElementById("uploadSub").textContent = "Re-upload anytime to start over.";
+    }
+
+    const sectionCount = draft.education.length + draft.experience.length + draft.projects.length + draft.achievements.length + draft.skills.length;
+    if (sectionCount > 0) {
+      document.getElementById("editStatus").textContent = `${sectionCount} entries in draft`;
+      document.getElementById("editSub").textContent = "Keep refining, or move on to publish.";
+    }
+
+    if (draft.publishedSlug && DB.getPublished(draft.publishedSlug)) {
+      document.getElementById("publishStatus").textContent = "Published";
+      document.getElementById("publishSub").textContent = `/portfolio.html?u=${draft.publishedSlug}`;
+      const link = `portfolio.html?u=${draft.publishedSlug}`;
+      const viewBtn = document.getElementById("viewLiveBtn");
+      viewBtn.href = link;
+      viewBtn.classList.remove("hidden");
+      const dashBtn = document.getElementById("dashViewBtn");
+      dashBtn.href = link;
+      dashBtn.classList.remove("hidden");
+      document.getElementById("dashSlugLine").textContent = link;
+    }
+  }
+</script>
+</body>
+</html>
+
+
+================================================================================
+FILE: resume-portfolio-site/editor.html
+================================================================================
+
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Editor — Portfolio, Unfolded</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;0,600;1,500&family=Space+Grotesk:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="wrap">
+    <a href="index.html" class="brand"><span class="fold"></span>Portfolio, Unfolded</a>
+    <div class="nav-links">
+      <a href="dashboard.html">Dashboard</a>
+      <a href="upload.html">Upload</a>
+      <a href="editor.html">Editor</a>
+    </div>
+    <div class="nav-cta"><button class="btn btn-ghost btn-sm" data-logout>Log out</button></div>
+    <button class="nav-toggle" aria-label="Toggle menu">☰</button>
+  </div>
+</nav>
+
+<main class="app-shell">
+  <div class="wrap">
+    <div class="app-head">
+      <div>
+        <p class="eyebrow">STEP_02–04 — EDIT, LAYOUT, PUBLISH</p>
+        <h1>Shape your portfolio</h1>
+        <p>Everything here saves to your draft as you type. Nothing is public until you publish it.</p>
+      </div>
+      <span class="save-note" id="saveNote">All changes saved</span>
+    </div>
+
+    <div class="editor-layout">
+      <nav class="editor-side" id="editorNav">
+        <button data-target="personal" class="active">Personal info</button>
+        <button data-target="education">Education <span class="count" id="cnt-education"></span></button>
+        <button data-target="experience">Experience <span class="count" id="cnt-experience"></span></button>
+        <button data-target="projects">Projects <span class="count" id="cnt-projects"></span></button>
+        <button data-target="skills">Skills <span class="count" id="cnt-skills"></span></button>
+        <button data-target="achievements">Achievements <span class="count" id="cnt-achievements"></span></button>
+        <button data-target="links">Links <span class="count" id="cnt-links"></span></button>
+        <button data-target="publish">Layout &amp; publish</button>
+      </nav>
+
+      <section class="editor-panel">
+
+        <div class="panel-section active" data-panel="personal">
+          <div class="panel-head"><div><h2>Personal info</h2><p>The header of your portfolio — who you are, in a line or two.</p></div></div>
+          <div class="entry-row">
+            <div class="field"><label>Full name</label><input type="text" id="p-name" placeholder="Jordan Lee"></div>
+            <div class="field"><label>Title / role</label><input type="text" id="p-title" placeholder="Software Engineer"></div>
+          </div>
+          <div class="field"><label>Short bio</label><textarea id="p-bio" placeholder="Two or three sentences on who you are and what you build."></textarea></div>
+          <div class="entry-row">
+            <div class="field"><label>Email</label><input type="email" id="p-email" placeholder="you@example.com"></div>
+            <div class="field"><label>Phone <span style="text-transform:none;">(optional)</span></label><input type="text" id="p-phone" placeholder="+91 98765 43210"></div>
+          </div>
+          <div class="field"><label>Location <span style="text-transform:none;">(optional)</span></label><input type="text" id="p-location" placeholder="Mumbai, India"></div>
+        </div>
+
+        <div class="panel-section" data-panel="education">
+          <div class="panel-head"><div><h2>Education</h2><p>Schools, degrees, and what you studied.</p></div><button class="btn btn-signal btn-sm" data-add="education">+ Add education</button></div>
+          <div class="list-container" id="list-education"></div>
+        </div>
+
+        <div class="panel-section" data-panel="experience">
+          <div class="panel-head"><div><h2>Experience</h2><p>Roles you've held and what you did in them.</p></div><button class="btn btn-signal btn-sm" data-add="experience">+ Add role</button></div>
+          <div class="list-container" id="list-experience"></div>
+        </div>
+
+        <div class="panel-section" data-panel="projects">
+          <div class="panel-head"><div><h2>Projects</h2><p>Things you've built, with a link if there is one.</p></div><button class="btn btn-signal btn-sm" data-add="projects">+ Add project</button></div>
+          <div class="list-container" id="list-projects"></div>
+        </div>
+
+        <div class="panel-section" data-panel="skills">
+          <div class="panel-head"><div><h2>Skills</h2><p>Add one at a time — press Enter after each.</p></div></div>
+          <div class="field"><input type="text" id="skillInput" placeholder="Type a skill and press Enter"></div>
+          <div class="skill-tags" id="skillTags"></div>
+        </div>
+
+        <div class="panel-section" data-panel="achievements">
+          <div class="panel-head"><div><h2>Achievements</h2><p>Awards, certifications, honors — anything you're proud of.</p></div><button class="btn btn-signal btn-sm" data-add="achievements">+ Add achievement</button></div>
+          <div class="list-container" id="list-achievements"></div>
+        </div>
+
+        <div class="panel-section" data-panel="links">
+          <div class="panel-head"><div><h2>Links</h2><p>LinkedIn, GitHub, a personal site — whatever you want on your header.</p></div><button class="btn btn-signal btn-sm" data-add="links">+ Add link</button></div>
+          <div class="list-container" id="list-links"></div>
+        </div>
+
+        <div class="panel-section" data-panel="publish">
+          <div class="panel-head"><div><h2>Layout &amp; publish</h2><p>Pick how it looks, then put it online.</p></div></div>
+          <div class="template-grid" id="templateGrid">
+            <div class="template-card" data-template="modern"><div class="swatch modern"></div><h4>Modern</h4><p>Bold header, clean sections</p></div>
+            <div class="template-card" data-template="mono"><div class="swatch mono"></div><h4>Mono</h4><p>Dark, technical, monospace</p></div>
+            <div class="template-card" data-template="timeline"><div class="swatch timeline"></div><h4>Timeline</h4><p>Dated entries on a thread</p></div>
+          </div>
+
+          <div class="mt-24" id="completeness"></div>
+
+          <div class="panel-footer" style="border-top:none; margin-top:24px; padding-top:0;">
+            <a href="#" id="previewBtn" target="_blank" class="btn btn-ghost">Preview draft →</a>
+            <button class="btn btn-primary" id="publishBtn">Publish portfolio →</button>
+          </div>
+
+          <div class="publish-box" id="publishBox">
+            <p class="field-tag">LIVE</p>
+            <p style="margin-top:6px; color:var(--text-hi);">Your portfolio is published. Share this link:</p>
+            <div class="link-row">
+              <input type="text" id="publishedLink" readonly>
+              <button class="btn btn-signal btn-sm" id="copyLinkBtn">Copy</button>
+            </div>
+          </div>
+        </div>
+
+      </section>
+    </div>
+  </div>
+</main>
+
+<script src="js/storage.js"></script>
+<script src="js/nav.js"></script>
+<script src="js/editor.js"></script>
+</body>
+</html>
+
+
+================================================================================
+FILE: resume-portfolio-site/index.html
+================================================================================
+
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Portfolio, Unfolded — turn your resume into a living site</title>
+<meta name="description" content="Upload your resume, review what it extracts, and publish a portfolio site in minutes." />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;0,600;1,500&family=Space+Grotesk:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="wrap">
+    <a href="index.html" class="brand"><span class="fold"></span>Portfolio, Unfolded</a>
+    <div class="nav-links">
+      <a href="index.html">Home</a>
+      <a href="dashboard.html" data-auth-only>Dashboard</a>
+    </div>
+    <div class="nav-cta">
+      <a href="login.html" class="btn btn-ghost btn-sm" data-auth-swap>Log in</a>
+      <a href="signup.html" class="btn btn-primary btn-sm" data-auth-swap>Get started</a>
+      <a href="dashboard.html" class="btn btn-primary btn-sm hidden" data-auth-only>Go to dashboard</a>
+    </div>
+    <button class="nav-toggle" aria-label="Toggle menu">☰</button>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap">
+    <div>
+      <p class="eyebrow">FIELD_00 — RESUME → PORTFOLIO</p>
+      <h1>Your resume has been sitting in a PDF prison.<br><em>Let it out.</em></h1>
+      <p class="lede">Upload the resume you already have. We pull out your education, experience, projects and skills, let you clean it up, and publish it as a real site with its own shareable link — no design work required.</p>
+      <div class="hero-actions">
+        <a href="signup.html" class="btn btn-primary">Escape the PDF →</a>
+        <a href="#how" class="btn btn-ghost">See how it works</a>
+      </div>
+      <div class="hero-meta">
+        <div><b>4 hrs</b>build to first publish</div>
+        <div><b>8</b>portfolio sections supported</div>
+        <div><b>1</b>link to share, anywhere</div>
+      </div>
+    </div>
+    <div class="peel-stage" aria-hidden="true">
+      <div class="peel-card peel-back">
+        <p class="tag">/portfolio/jordan-lee-9f2a</p>
+        <h3>Jordan Lee</h3>
+        <div class="bar w1"></div>
+        <div class="bar w2"></div>
+        <div class="bar w3"></div>
+        <div class="chips">
+          <span class="chip">React</span>
+          <span class="chip">Figma</span>
+          <span class="chip">SQL</span>
+        </div>
+      </div>
+      <div class="peel-card peel-front">
+        <div class="name">Jordan Lee</div>
+        <div class="role">RESUME.PDF — 1 PAGE</div>
+        <div class="rule"></div>
+        <div class="line w1"></div>
+        <div class="line w2"></div>
+        <div class="line w3"></div>
+        <div class="line w4"></div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<section class="section" id="how">
+  <div class="wrap">
+    <div class="section-head">
+      <p class="eyebrow">FIELD_01 — THE FLOW</p>
+      <h2>From upload to public link, in four steps.</h2>
+      <p>Nothing here needs a designer or a developer — you already wrote the hard part.</p>
+    </div>
+    <div class="flow-steps">
+      <div class="flow-step">
+        <p class="field-tag">STEP_01</p>
+        <h4>Upload your resume</h4>
+        <p>Drop in your existing PDF. We read it right in your browser — nothing is sent to a server.</p>
+      </div>
+      <div class="flow-step">
+        <p class="field-tag">STEP_02</p>
+        <h4>Review the extraction</h4>
+        <p>Education, experience, projects, skills and achievements come back sorted into sections.</p>
+      </div>
+      <div class="flow-step">
+        <p class="field-tag">STEP_03</p>
+        <h4>Edit &amp; reorder</h4>
+        <p>Fix anything that's off, add what's missing, drag sections into the order you want.</p>
+      </div>
+      <div class="flow-step">
+        <p class="field-tag">STEP_04</p>
+        <h4>Publish</h4>
+        <p>Pick a layout and get a shareable link — responsive, live, and yours.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap">
+    <div class="section-head">
+      <p class="eyebrow">FIELD_02 — KEY FEATURES</p>
+      <h2>Everything a portfolio needs, nothing it doesn't.</h2>
+    </div>
+    <div class="feature-list">
+      <div class="feature-row"><span class="field-tag">01 · ACCT</span><div><h4>Secure registration &amp; login</h4><p>Your own account keeps drafts and published sites tied to you.</p></div></div>
+      <div class="feature-row"><span class="field-tag">02 · PARSE</span><div><h4>Resume upload &amp; extraction</h4><p>Structured information pulled straight out of your existing PDF.</p></div></div>
+      <div class="feature-row"><span class="field-tag">03 · SORT</span><div><h4>Section identification</h4><p>Education, experience, projects, skills, achievements &amp; links — organized automatically.</p></div></div>
+      <div class="feature-row"><span class="field-tag">04 · LAYOUT</span><div><h4>Choice of visual layout</h4><p>Generate a polished portfolio in a layout you pick, not one you're stuck with.</p></div></div>
+      <div class="feature-row"><span class="field-tag">05 · EDIT</span><div><h4>A real editing area</h4><p>Review, modify, add, remove and reorder every piece of information.</p></div></div>
+      <div class="feature-row"><span class="field-tag">06 · SCALE</span><div><h4>Multiple entries, no limit</h4><p>Add as many projects, roles or achievements as you need — the layout holds.</p></div></div>
+      <div class="feature-row"><span class="field-tag">07 · RESPONSIVE</span><div><h4>Looks right everywhere</h4><p>Phone, tablet, laptop — the published site adapts to the screen it's on.</p></div></div>
+      <div class="feature-row"><span class="field-tag">08 · SHARE</span><div><h4>One link, always live</h4><p>A unique public URL for every published portfolio, ready to drop in an email or a bio.</p></div></div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap">
+    <div class="section-head">
+      <p class="eyebrow">FIELD_03 — GOING FURTHER</p>
+      <h2>Brownie points, if you've got the time.</h2>
+    </div>
+    <div class="bonus-grid">
+      <div class="bonus-card"><span class="field-tag">STRONGER INTRO</span>Rewrite a flat summary into a sharper professional introduction.</div>
+      <div class="bonus-card"><span class="field-tag">CONTENT SUGGESTIONS</span>Get suggested improvements to project and achievement descriptions.</div>
+      <div class="bonus-card"><span class="field-tag">SWITCH LAYOUTS</span>Change visual style anytime without losing your information.</div>
+      <div class="bonus-card"><span class="field-tag">QUALITY FEEDBACK</span>See how complete your portfolio is before you publish.</div>
+      <div class="bonus-card"><span class="field-tag">VISIT INSIGHTS</span>Know when your portfolio's been viewed, and by roughly how many.</div>
+      <div class="bonus-card"><span class="field-tag">EXPORT</span>Download your finished portfolio for use outside the platform.</div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap">
+    <div class="cta-band">
+      <p class="eyebrow">FIELD_04 — READY?</p>
+      <h2>Your resume already did the hard part.</h2>
+      <p>Give it somewhere to live.</p>
+      <div class="hero-actions">
+        <a href="signup.html" class="btn btn-primary">Create your account →</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer class="site-footer">
+  <div class="wrap" style="display:flex; justify-content:space-between; width:100%; flex-wrap:wrap; gap:12px;">
+    <span>Portfolio, Unfolded — built for Guru Nanak Khalsa College Hackathon 2026, Problem Statement 02.</span>
+    <span>Front-end demo · data stored locally in your browser</span>
+  </div>
+</footer>
+
+<script src="js/storage.js"></script>
+<script src="js/nav.js"></script>
+</body>
+</html>
+
+
+================================================================================
+FILE: resume-portfolio-site/js/auth.js
+================================================================================
+
+document.addEventListener("DOMContentLoaded", () => {
+  const errorBox = document.getElementById("formError");
+  const showError = (msg) => {
+    if (!errorBox) return;
+    errorBox.textContent = msg;
+    errorBox.classList.add("show");
+  };
+
+  const signupForm = document.getElementById("signupForm");
+  if (signupForm) {
+    signupForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const name = document.getElementById("name").value.trim();
+      const email = document.getElementById("email").value.trim().toLowerCase();
+      const password = document.getElementById("password").value;
+
+      if (!name || !email || password.length < 6) {
+        showError("Please fill every field — password needs at least 6 characters.");
+        return;
+      }
+      if (DB.findUser(email)) {
+        showError("An account with that email already exists — try logging in instead.");
+        return;
+      }
+      DB.saveUser({ name, email, password });
+      DB.setSession(email);
+      window.location.href = "dashboard.html";
+    });
+  }
+
+  const loginForm = document.getElementById("loginForm");
+  if (loginForm) {
+    loginForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const email = document.getElementById("email").value.trim().toLowerCase();
+      const password = document.getElementById("password").value;
+      const user = DB.findUser(email);
+
+      if (!user || user.password !== password) {
+        showError("That email and password don't match any account here.");
+        return;
+      }
+      DB.setSession(email);
+      window.location.href = "dashboard.html";
+    });
+  }
+});
+
+
+================================================================================
+FILE: resume-portfolio-site/js/editor.js
+================================================================================
+
+document.addEventListener("DOMContentLoaded", () => {
+  const user = DB.requireAuth();
+  if (!user) return;
+
+  let draft = DB.getDraft(user.email);
+  const saveNote = document.getElementById("saveNote");
+  let saveTimer = null;
+
+  function scheduleSave() {
+    saveNote.textContent = "Saving…";
+    saveNote.classList.remove("saved");
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      DB.saveDraft(user.email, draft);
+      saveNote.textContent = "All changes saved";
+      saveNote.classList.add("saved");
+      refreshCounts();
+      renderCompleteness();
+    }, 400);
+  }
+
+  // ---------------- side nav ----------------
+  const navButtons = document.querySelectorAll("#editorNav button");
+  navButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      navButtons.forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      document.querySelectorAll(".panel-section").forEach((p) => p.classList.remove("active"));
+      document.querySelector(`.panel-section[data-panel="${btn.dataset.target}"]`).classList.add("active");
+    });
+  });
+
+  function refreshCounts() {
+    ["education", "experience", "projects", "achievements", "links"].forEach((k) => {
+      const el = document.getElementById(`cnt-${k}`);
+      const n = k === "links" ? draft.personal.links.length : draft[k].length;
+      el.textContent = n || "";
+    });
+    document.getElementById("cnt-skills").textContent = draft.skills.length || "";
+  }
+
+  // ---------------- personal info ----------------
+  const p = draft.personal;
+  document.getElementById("p-name").value = p.name || "";
+  document.getElementById("p-title").value = p.title || "";
+  document.getElementById("p-bio").value = p.bio || "";
+  document.getElementById("p-email").value = p.email || "";
+  document.getElementById("p-phone").value = p.phone || "";
+  document.getElementById("p-location").value = p.location || "";
+  [["p-name","name"],["p-title","title"],["p-bio","bio"],["p-email","email"],["p-phone","phone"],["p-location","location"]]
+    .forEach(([id, field]) => {
+      document.getElementById(id).addEventListener("input", (e) => {
+        draft.personal[field] = e.target.value;
+        scheduleSave();
+      });
+    });
+
+  // ---------------- generic list sections ----------------
+  const LIST_CONFIG = {
+    education: {
+      container: "list-education", label: "education", titleField: "school",
+      fields: [
+        { key: "school", label: "School", width: "full" },
+        { key: "degree", label: "Degree", width: "half" },
+        { key: "field", label: "Field of study", width: "half" },
+        { key: "start", label: "Start", width: "half", placeholder: "2019" },
+        { key: "end", label: "End", width: "half", placeholder: "2023" },
+        { key: "description", label: "Notes", width: "full", area: true },
+      ],
+      blank: () => ({ id: DB.uid(), school: "", degree: "", field: "", start: "", end: "", description: "" }),
+      source: () => draft.education,
+    },
+    experience: {
+      container: "list-experience", label: "role", titleField: "company",
+      fields: [
+        { key: "company", label: "Company", width: "half" },
+        { key: "role", label: "Role", width: "half" },
+        { key: "start", label: "Start", width: "half", placeholder: "Jan 2023" },
+        { key: "end", label: "End", width: "half", placeholder: "Present" },
+        { key: "description", label: "What you did", width: "full", area: true },
+      ],
+      blank: () => ({ id: DB.uid(), company: "", role: "", start: "", end: "", description: "" }),
+      source: () => draft.experience,
+    },
+    projects: {
+      container: "list-projects", label: "project", titleField: "title",
+      fields: [
+        { key: "title", label: "Project title", width: "half" },
+        { key: "tech", label: "Tech used", width: "half", placeholder: "React, Node, Postgres" },
+        { key: "link", label: "Link", width: "full", placeholder: "https://…" },
+        { key: "description", label: "Description", width: "full", area: true },
+      ],
+      blank: () => ({ id: DB.uid(), title: "", description: "", link: "", tech: "" }),
+      source: () => draft.projects,
+    },
+    achievements: {
+      container: "list-achievements", label: "achievement", titleField: "title",
+      fields: [
+        { key: "title", label: "Title", width: "half" },
+        { key: "date", label: "Date", width: "half", placeholder: "2024" },
+        { key: "description", label: "Description", width: "full", area: true },
+      ],
+      blank: () => ({ id: DB.uid(), title: "", description: "", date: "" }),
+      source: () => draft.achievements,
+    },
+    links: {
+      container: "list-links", label: "link", titleField: "label",
+      fields: [
+        { key: "label", label: "Label", width: "half", placeholder: "LinkedIn" },
+        { key: "url", label: "URL", width: "half", placeholder: "https://…" },
+      ],
+      blank: () => ({ id: DB.uid(), label: "", url: "" }),
+      source: () => draft.personal.links,
+    },
+  };
+
+  function renderList(key) {
+    const cfg = LIST_CONFIG[key];
+    const container = document.getElementById(cfg.container);
+    const items = cfg.source();
+    container.innerHTML = "";
+    if (!items.length) {
+      const empty = document.createElement("p");
+      empty.style.fontSize = "13.5px";
+      empty.textContent = `No ${cfg.label} entries yet — add your first one.`;
+      container.appendChild(empty);
+      return;
+    }
+    items.forEach((item, idx) => {
+      const card = document.createElement("div");
+      card.className = "entry-card";
+
+      const head = document.createElement("div");
+      head.className = "entry-head";
+      const tag = document.createElement("span");
+      tag.className = "field-tag";
+      tag.textContent = `${cfg.label.toUpperCase()}_${String(idx + 1).padStart(2, "0")}`;
+      const actions = document.createElement("div");
+      actions.className = "entry-actions";
+      actions.appendChild(iconButton("↑", () => moveEntry(key, idx, -1)));
+      actions.appendChild(iconButton("↓", () => moveEntry(key, idx, 1)));
+      actions.appendChild(iconButton("✕", () => removeEntry(key, idx)));
+      head.appendChild(tag);
+      head.appendChild(actions);
+      card.appendChild(head);
+
+      const row = document.createElement("div");
+      row.className = "entry-row";
+      cfg.fields.forEach((f) => {
+        const wrap = document.createElement("div");
+        wrap.className = "field";
+        if (f.width === "full") wrap.style.gridColumn = "1 / -1";
+        const label = document.createElement("label");
+        label.textContent = f.label;
+        const input = document.createElement(f.area ? "textarea" : "input");
+        if (!f.area) input.type = "text";
+        input.placeholder = f.placeholder || "";
+        input.value = item[f.key] || "";
+        input.addEventListener("input", (e) => {
+          items[idx][f.key] = e.target.value;
+          scheduleSave();
+        });
+        wrap.appendChild(label);
+        wrap.appendChild(input);
+        row.appendChild(wrap);
+      });
+      card.appendChild(row);
+      container.appendChild(card);
+    });
+  }
+
+  function iconButton(symbol, onClick) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "icon-btn";
+    btn.textContent = symbol;
+    btn.addEventListener("click", onClick);
+    return btn;
+  }
+
+  function addEntry(key) {
+    const cfg = LIST_CONFIG[key];
+    cfg.source().push(cfg.blank());
+    scheduleSave();
+    renderList(key);
+  }
+  function removeEntry(key, idx) {
+    LIST_CONFIG[key].source().splice(idx, 1);
+    scheduleSave();
+    renderList(key);
+  }
+  function moveEntry(key, idx, dir) {
+    const arr = LIST_CONFIG[key].source();
+    const newIdx = idx + dir;
+    if (newIdx < 0 || newIdx >= arr.length) return;
+    [arr[idx], arr[newIdx]] = [arr[newIdx], arr[idx]];
+    scheduleSave();
+    renderList(key);
+  }
+
+  document.querySelectorAll("[data-add]").forEach((btn) => {
+    btn.addEventListener("click", () => addEntry(btn.dataset.add));
+  });
+  Object.keys(LIST_CONFIG).forEach(renderList);
+
+  // ---------------- skills ----------------
+  function renderSkills() {
+    const box = document.getElementById("skillTags");
+    box.innerHTML = "";
+    draft.skills.forEach((skill, idx) => {
+      const tag = document.createElement("span");
+      tag.className = "skill-tag";
+      const txt = document.createElement("span");
+      txt.textContent = skill;
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.textContent = "✕";
+      remove.addEventListener("click", () => {
+        draft.skills.splice(idx, 1);
+        scheduleSave();
+        renderSkills();
+      });
+      tag.appendChild(txt);
+      tag.appendChild(remove);
+      box.appendChild(tag);
+    });
+  }
+  renderSkills();
+  document.getElementById("skillInput").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const val = e.target.value.trim();
+      if (val && !draft.skills.includes(val)) {
+        draft.skills.push(val);
+        scheduleSave();
+        renderSkills();
+      }
+      e.target.value = "";
+    }
+  });
+
+  // ---------------- template picker ----------------
+  function renderTemplateSelection() {
+    document.querySelectorAll(".template-card").forEach((card) => {
+      card.classList.toggle("selected", card.dataset.template === draft.template);
+    });
+  }
+  renderTemplateSelection();
+  document.querySelectorAll(".template-card").forEach((card) => {
+    card.addEventListener("click", () => {
+      draft.template = card.dataset.template;
+      scheduleSave();
+      renderTemplateSelection();
+    });
+  });
+
+  // ---------------- completeness (brownie point) ----------------
+  function renderCompleteness() {
+    const checks = [
+      !!draft.personal.name, !!draft.personal.title, !!draft.personal.bio,
+      draft.education.length > 0, draft.experience.length > 0,
+      draft.projects.length > 0, draft.skills.length > 0, draft.achievements.length > 0,
+    ];
+    const score = Math.round((checks.filter(Boolean).length / checks.length) * 100);
+    const box = document.getElementById("completeness");
+    box.innerHTML = `
+      <p class="field-tag">PORTFOLIO COMPLETENESS — ${score}%</p>
+      <div class="progress-bar show" style="margin-top:8px;"><i style="width:${score}%;"></i></div>
+      <p class="field-hint mt-8">${score < 100 ? "Fill in a bio, and at least one entry per section, for the strongest first impression." : "Every section has something in it — you're ready to publish."}</p>
+    `;
+  }
+  renderCompleteness();
+
+  // ---------------- preview / publish ----------------
+  document.getElementById("previewBtn").addEventListener("click", (e) => {
+    e.preventDefault();
+    DB.saveDraft(user.email, draft);
+    window.open(`portfolio.html?previewEmail=${encodeURIComponent(user.email)}`, "_blank");
+  });
+
+  document.getElementById("publishBtn").addEventListener("click", () => {
+    if (!draft.personal.name) {
+      alert("Add at least your name in Personal info before publishing.");
+      return;
+    }
+    const slug = DB.publish(user.email, draft);
+    const url = `${window.location.origin}${window.location.pathname.replace("editor.html", "")}portfolio.html?u=${slug}`;
+    document.getElementById("publishedLink").value = url;
+    document.getElementById("publishBox").classList.add("show");
+  });
+
+  document.getElementById("copyLinkBtn").addEventListener("click", () => {
+    const input = document.getElementById("publishedLink");
+    input.select();
+    navigator.clipboard.writeText(input.value).then(() => {
+      const btn = document.getElementById("copyLinkBtn");
+      const original = btn.textContent;
+      btn.textContent = "Copied!";
+      setTimeout(() => (btn.textContent = original), 1500);
+    });
+  });
+
+  if (draft.publishedSlug && DB.getPublished(draft.publishedSlug)) {
+    const url = `${window.location.origin}${window.location.pathname.replace("editor.html", "")}portfolio.html?u=${draft.publishedSlug}`;
+    document.getElementById("publishedLink").value = url;
+    document.getElementById("publishBox").classList.add("show");
+  }
+
+  refreshCounts();
+});
+
+
+================================================================================
+FILE: resume-portfolio-site/js/nav.js
+================================================================================
+
+document.addEventListener("DOMContentLoaded", () => {
+  const nav = document.querySelector(".site-nav");
+  const toggle = document.querySelector(".nav-toggle");
+  if (toggle && nav) {
+    toggle.addEventListener("click", () => nav.classList.toggle("open"));
+  }
+
+  // highlight current page in nav
+  const here = window.location.pathname.split("/").pop() || "index.html";
+  document.querySelectorAll(".nav-links a").forEach((a) => {
+    if (a.getAttribute("href") === here) a.classList.add("active");
+  });
+
+  // wire up any logout buttons
+  document.querySelectorAll("[data-logout]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      DB.clearSession();
+      window.location.href = "index.html";
+    });
+  });
+
+  // reflect session state: swap "Log in / Sign up" for "Dashboard / Log out"
+  const session = typeof DB !== "undefined" ? DB.getSession() : null;
+  document.querySelectorAll("[data-auth-swap]").forEach((el) => {
+    el.classList.toggle("hidden", !!session);
+  });
+  document.querySelectorAll("[data-auth-only]").forEach((el) => {
+    el.classList.toggle("hidden", !session);
+  });
+});
+
+
+================================================================================
+FILE: resume-portfolio-site/js/portfolio.js
+================================================================================
+
+function esc(str) {
+  const d = document.createElement("div");
+  d.textContent = str || "";
+  return d.innerHTML;
+}
+function safeHref(url) {
+  if (!url) return "#";
+  return /^https?:\/\//i.test(url) ? url : "https://" + url;
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  const params = new URLSearchParams(window.location.search);
+  const slug = params.get("u");
+  const previewEmail = params.get("previewEmail");
+  const page = document.getElementById("pfPage");
+  const wrap = document.getElementById("pfWrap");
+
+  let data = null;
+  let isPreview = false;
+  if (slug) {
+    data = DB.getPublished(slug);
+  } else if (previewEmail) {
+    data = DB.getDraft(previewEmail);
+    isPreview = true;
+  }
+
+  if (!data || !data.personal || !data.personal.name) {
+    wrap.innerHTML = `
+      <div class="pf-empty">
+        <p class="field-tag">404</p>
+        <h2 class="mt-16">Nothing published here yet</h2>
+        <p class="mt-16">This link doesn't match a published portfolio in this browser.</p>
+      </div>`;
+    document.title = "Portfolio not found";
+    return;
+  }
+
+  page.classList.add(`tpl-${data.template || "modern"}`);
+  document.title = `${data.personal.name} — Portfolio`;
+
+  const links = (data.personal.links || []).filter((l) => l.url);
+  const linksHtml = links.length
+    ? `<div class="pf-links">${links.map((l) => `<a href="${esc(safeHref(l.url))}" target="_blank" rel="noopener">${esc(l.label || "Link")}</a>`).join("")}</div>`
+    : "";
+
+  const contactBits = [data.personal.location, data.personal.email, data.personal.phone].filter(Boolean).join("  ·  ");
+
+  let html = `
+    ${isPreview ? `<div class="field-tag" style="margin-bottom:18px;">PREVIEW — this draft isn't published yet</div>` : ""}
+    <div class="pf-header">
+      <p class="field-tag">${esc(contactBits || "PORTFOLIO")}</p>
+      <h1>${esc(data.personal.name)}</h1>
+      ${data.personal.title ? `<p class="role">${esc(data.personal.title)}</p>` : ""}
+      ${data.personal.bio ? `<p class="bio">${esc(data.personal.bio)}</p>` : ""}
+      ${linksHtml}
+    </div>
+  `;
+
+  if (data.experience && data.experience.length) {
+    html += section("Experience", data.experience.map((e) => item(
+      [e.role, e.company].filter(Boolean).join(" · "),
+      dateRange(e.start, e.end),
+      e.description
+    )));
+  }
+  if (data.projects && data.projects.length) {
+    html += section("Projects", data.projects.map((p) => item(
+      p.link ? `<a href="${esc(safeHref(p.link))}" target="_blank" rel="noopener">${esc(p.title)}</a>` : esc(p.title),
+      p.tech || "",
+      p.description
+    )));
+  }
+  if (data.education && data.education.length) {
+    html += section("Education", data.education.map((e) => {
+      const sub = [e.degree, e.field].filter(Boolean).join(" · ");
+      const desc = [sub, e.description].filter(Boolean).join(" — ");
+      return item(esc(e.school), dateRange(e.start, e.end), desc);
+    }));
+  }
+  if (data.skills && data.skills.length) {
+    html += `
+      <div class="pf-section">
+        <p class="field-tag">Skills</p>
+        <div class="pf-skill-tags">${data.skills.map((s) => `<span>${esc(s)}</span>`).join("")}</div>
+      </div>`;
+  }
+  if (data.achievements && data.achievements.length) {
+    html += section("Achievements", data.achievements.map((a) => item(a.title, a.date || "", a.description)));
+  }
+
+  html += `<div class="pf-footer">Built with Portfolio, Unfolded</div>`;
+  wrap.innerHTML = html;
+
+  function section(title, itemsHtml) {
+    return `<div class="pf-section"><p class="field-tag">${esc(title)}</p><h2>${esc(title)}</h2>${itemsHtml.join("")}</div>`;
+  }
+  function item(titleHtml, when, description) {
+    return `
+      <div class="pf-item">
+        <div class="pf-item-top">
+          <h3>${titleHtml}</h3>
+          ${when ? `<span class="when">${esc(when)}</span>` : ""}
+        </div>
+        ${description ? `<p>${esc(description)}</p>` : ""}
+      </div>`;
+  }
+  function dateRange(start, end) {
+    return [start, end].filter(Boolean).join(" – ");
+  }
+});
+
+
+================================================================================
+FILE: resume-portfolio-site/js/storage.js
+================================================================================
+
+/* ============================================================
+   storage.js — the "database" for this static, front-end-only
+   build. Everything lives in localStorage, scoped to whichever
+   browser the user is in.
+
+   IMPORTANT LIMITATION (see README): because there is no server,
+   a "published" portfolio link only resolves on the SAME browser
+   that published it. To make links resolve for anyone, anywhere,
+   swap this file's storage calls for a real backend (Firebase,
+   Supabase, or a small Node/Express API) — every other page
+   only talks to the functions in this file, so that's the one
+   place you'd need to change.
+   ============================================================ */
+
+const DB = {
+  KEYS: {
+    USERS: "rp_users",
+    SESSION: "rp_session",
+    DRAFT_PREFIX: "rp_draft_",
+    PUBLISHED_PREFIX: "rp_published_",
+  },
+
+  _read(key, fallback) {
+    try {
+      const raw = localStorage.getItem(key);
+      return raw ? JSON.parse(raw) : fallback;
+    } catch (e) {
+      return fallback;
+    }
+  },
+  _write(key, value) {
+    localStorage.setItem(key, JSON.stringify(value));
+  },
+
+  // ---------- users / session ----------
+  // NOTE: this is a MOCK auth system for demo purposes only —
+  // passwords are stored in plain text in the browser. Never do
+  // this in a real product; swap in real auth (Firebase Auth,
+  // Auth0, your own backend) before this goes anywhere near
+  // real users.
+  getUsers() { return this._read(this.KEYS.USERS, {}); },
+  saveUser(user) {
+    const users = this.getUsers();
+    users[user.email] = user;
+    this._write(this.KEYS.USERS, users);
+  },
+  findUser(email) {
+    return this.getUsers()[email.toLowerCase().trim()] || null;
+  },
+  setSession(email) { this._write(this.KEYS.SESSION, { email }); },
+  getSession() { return this._read(this.KEYS.SESSION, null); },
+  clearSession() { localStorage.removeItem(this.KEYS.SESSION); },
+  currentUser() {
+    const s = this.getSession();
+    if (!s) return null;
+    return this.findUser(s.email);
+  },
+  requireAuth() {
+    if (!this.getSession()) {
+      window.location.href = "login.html";
+      return null;
+    }
+    return this.currentUser();
+  },
+
+  // ---------- portfolio draft (per user, editable) ----------
+  emptyPortfolio() {
+    return {
+      personal: { name: "", title: "", bio: "", email: "", phone: "", location: "", links: [] },
+      education: [],
+      experience: [],
+      projects: [],
+      skills: [],
+      achievements: [],
+      template: "modern",
+      publishedSlug: null,
+      updatedAt: null,
+    };
+  },
+  getDraft(email) {
+    return this._read(this.KEYS.DRAFT_PREFIX + email, this.emptyPortfolio());
+  },
+  saveDraft(email, data) {
+    data.updatedAt = new Date().toISOString();
+    this._write(this.KEYS.DRAFT_PREFIX + email, data);
+  },
+
+  // ---------- published (public, keyed by slug) ----------
+  slugify(name) {
+    const base = (name || "portfolio")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)/g, "") || "portfolio";
+    const rand = Math.random().toString(36).slice(2, 6);
+    return `${base}-${rand}`;
+  },
+  publish(email, data) {
+    const slug = data.publishedSlug || this.slugify(data.personal.name);
+    data.publishedSlug = slug;
+    this._write(this.KEYS.PUBLISHED_PREFIX + slug, data);
+    this.saveDraft(email, data);
+    return slug;
+  },
+  getPublished(slug) {
+    return this._read(this.KEYS.PUBLISHED_PREFIX + slug, null);
+  },
+
+  // ---------- small id helper for list entries ----------
+  uid() { return Math.random().toString(36).slice(2, 10); },
+};
+
+// mock data dropped into a draft right after "extraction" on the
+// upload page — stands in for a real PDF/NLP parser's output.
+function mockExtractedData(fileName) {
+  const displayName = (fileName || "Your Name").replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ");
+  return {
+    personal: {
+      name: titleCase(displayName) || "Your Name",
+      title: "Software Engineer",
+      bio: "Detected from your resume header — rewrite this into a short introduction of who you are and what you build.",
+      email: "you@example.com",
+      phone: "",
+      location: "",
+      links: [{ label: "LinkedIn", url: "" }, { label: "GitHub", url: "" }],
+    },
+    education: [
+      { id: DB.uid(), school: "Detected institution", degree: "Detected degree", field: "", start: "", end: "", description: "" },
+    ],
+    experience: [
+      { id: DB.uid(), company: "Detected company", role: "Detected role", start: "", end: "", description: "Add a line or two on what you owned and shipped here." },
+    ],
+    projects: [
+      { id: DB.uid(), title: "Detected project", description: "Short summary of the project and your role in it.", link: "", tech: "" },
+    ],
+    skills: ["Communication", "Problem solving"],
+    achievements: [
+      { id: DB.uid(), title: "Detected achievement", description: "", date: "" },
+    ],
+    template: "modern",
+    publishedSlug: null,
+    updatedAt: null,
+  };
+}
+function titleCase(s) {
+  return s.replace(/\w\S*/g, (t) => t[0].toUpperCase() + t.slice(1).toLowerCase());
+}
+
+
+================================================================================
+FILE: resume-portfolio-site/js/upload.js
+================================================================================
+
+/* ============================================================
+   upload.js
+   Reads an uploaded PDF fully client-side (pdf.js), then runs a
+   small heuristic parser to sort the text into resume sections.
+   This is genuinely reading the file — not a fake progress bar —
+   but heuristic text parsing is never perfect, so the result is
+   handed to the editor for review, same as the brief asks for.
+   ============================================================ */
+
+// pdf.js itself (window.pdfjsLib) is loaded and configured by an
+// inline module script in upload.html, since the 4.x cdnjs build
+// is ES-module-only. We only ever touch it inside functions below,
+// never at top-level, so load order between the two scripts doesn't matter.
+
+const SECTION_PATTERNS = [
+  { key: "education", re: /^(education|academics?|academic background)\b/i },
+  { key: "experience", re: /^(work )?experience|employment history|professional experience/i },
+  { key: "projects", re: /^projects?\b/i },
+  { key: "skills", re: /^(technical )?skills|technologies|tech stack/i },
+  { key: "achievements", re: /^achievements?|awards?|certifications?|honou?rs?/i },
+  { key: "links", re: /^links?\b|contact\b/i },
+];
+const EMAIL_RE = /[\w.+-]+@[\w-]+\.[\w.-]+/;
+const PHONE_RE = /(\+?\d[\d\s().-]{7,}\d)/;
+const URL_RE = /((https?:\/\/)?(www\.)?[\w-]+\.(com|net|org|io|dev|me|in|co)[\w/\-?=&%.]*)/i;
+const DATE_RANGE_RE = /(\b[A-Za-z]{3,9}\.?\s*\d{4}\b|\b\d{4}\b)\s*[-–—]+\s*(present|\b[A-Za-z]{3,9}\.?\s*\d{4}\b|\b\d{4}\b)/i;
+
+function isLikelyHeader(line) {
+  const t = line.trim();
+  if (t.length > 42) return null;
+  for (const p of SECTION_PATTERNS) if (p.re.test(t)) return p.key;
+  return null;
+}
+
+async function extractPdfLines(file, log) {
+  if (!window.pdfjsLib) throw new Error("PDF reader didn't load — check your connection");
+  const buf = await file.arrayBuffer();
+  const pdf = await window.pdfjsLib.getDocument({ data: buf }).promise;
+  log(`Opened PDF — ${pdf.numPages} page(s) detected.`, "ok");
+  const lines = [];
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p);
+    const content = await page.getTextContent();
+    const byY = new Map();
+    content.items.forEach((item) => {
+      if (!item.str || !item.str.trim()) return;
+      const y = Math.round(item.transform[5]);
+      if (!byY.has(y)) byY.set(y, []);
+      byY.get(y).push(item);
+    });
+    const ys = Array.from(byY.keys()).sort((a, b) => b - a);
+    ys.forEach((y) => {
+      const items = byY.get(y).sort((a, b) => a.transform[4] - b.transform[4]);
+      const line = items.map((i) => i.str).join(" ").replace(/\s+/g, " ").trim();
+      if (line) lines.push(line);
+    });
+  }
+  log(`Pulled ${lines.length} line(s) of text.`, "ok");
+  return lines;
+}
+
+function bucketLines(lines) {
+  const buckets = { preamble: [], education: [], experience: [], projects: [], skills: [], achievements: [], links: [] };
+  let current = "preamble";
+  lines.forEach((line) => {
+    const headerKey = isLikelyHeader(line);
+    if (headerKey) { current = headerKey; return; }
+    buckets[current].push(line);
+  });
+  return buckets;
+}
+
+function parsePersonal(preambleLines) {
+  const contact = { email: "", phone: "", links: [] };
+  const nameLines = [];
+  preambleLines.slice(0, 12).forEach((line) => {
+    const email = line.match(EMAIL_RE);
+    const url = line.match(URL_RE);
+    const phone = line.match(PHONE_RE);
+    if (email) contact.email = email[0];
+    else if (url) contact.links.push({ label: guessLinkLabel(url[0]), url: url[0].startsWith("http") ? url[0] : "https://" + url[0] });
+    else if (phone && phone[0].replace(/\D/g, "").length >= 8) contact.phone = phone[0].trim();
+    else nameLines.push(line);
+  });
+  return {
+    name: nameLines[0] || "",
+    title: nameLines[1] || "",
+    bio: nameLines.slice(2).join(" ").slice(0, 400) || "",
+    email: contact.email,
+    phone: contact.phone,
+    location: "",
+    links: contact.links.length ? contact.links : [{ label: "LinkedIn", url: "" }, { label: "GitHub", url: "" }],
+  };
+}
+
+function guessLinkLabel(url) {
+  if (/linkedin/i.test(url)) return "LinkedIn";
+  if (/github/i.test(url)) return "GitHub";
+  return "Website";
+}
+
+function splitDates(str) {
+  const m = str.match(DATE_RANGE_RE);
+  if (!m) return { start: "", end: "", rest: str };
+  return { start: m[1], end: m[2], rest: str.replace(m[0], "").replace(/[,|]\s*$/, "").trim() };
+}
+
+// turns a bucket of lines into entries, splitting a new entry
+// whenever a line carries a date range (a common resume pattern)
+function parseEntries(bucketLines) {
+  const entries = [];
+  let current = null;
+  bucketLines.forEach((line) => {
+    if (DATE_RANGE_RE.test(line) || !current) {
+      const { start, end, rest } = splitDates(line);
+      current = { headerRaw: rest || line, start, end, descLines: [] };
+      entries.push(current);
+    } else {
+      current.descLines.push(line);
+    }
+  });
+  return entries.filter((e) => e.headerRaw || e.descLines.length);
+}
+
+function toEducation(entries) {
+  return entries.slice(0, 6).map((e) => {
+    const parts = e.headerRaw.split(/\s*[|•·]\s*|\s{2,}/).filter(Boolean);
+    return { id: DB.uid(), school: parts[0] || e.headerRaw, degree: parts[1] || "", field: parts[2] || "", start: e.start, end: e.end, description: e.descLines.join(" ").slice(0, 300) };
+  });
+}
+function toExperience(entries) {
+  return entries.slice(0, 8).map((e) => {
+    const parts = e.headerRaw.split(/\s*[|•·]\s*|\s{2,}/).filter(Boolean);
+    return { id: DB.uid(), company: parts[0] || e.headerRaw, role: parts[1] || "", start: e.start, end: e.end, description: e.descLines.join(" ").slice(0, 400) };
+  });
+}
+function toProjects(entries) {
+  return entries.slice(0, 8).map((e) => {
+    const url = e.descLines.join(" ").match(URL_RE);
+    return { id: DB.uid(), title: e.headerRaw, description: e.descLines.join(" ").slice(0, 400), link: url ? (url[0].startsWith("http") ? url[0] : "https://" + url[0]) : "", tech: "" };
+  });
+}
+function toAchievements(entries) {
+  return entries.slice(0, 8).map((e) => ({ id: DB.uid(), title: e.headerRaw, description: e.descLines.join(" ").slice(0, 300), date: e.start || e.end }));
+}
+function toSkills(lines) {
+  const joined = lines.join(", ");
+  return joined.split(/[,;•·|]/).map((s) => s.trim()).filter((s) => s && s.length < 34).slice(0, 24);
+}
+
+async function parseResume(file, log) {
+  const lines = await extractPdfLines(file, log);
+  if (!lines.length) throw new Error("No selectable text found — this may be a scanned image PDF.");
+  const buckets = bucketLines(lines);
+  log(`Sorting content into sections…`, "");
+  const data = DB.emptyPortfolio();
+  data.personal = parsePersonal(buckets.preamble);
+  data.education = toEducation(parseEntries(buckets.education));
+  data.experience = toExperience(parseEntries(buckets.experience));
+  data.projects = toProjects(parseEntries(buckets.projects));
+  data.achievements = toAchievements(parseEntries(buckets.achievements));
+  data.skills = toSkills(buckets.skills);
+  if (buckets.links.length) {
+    data.personal.links = data.personal.links.concat(
+      buckets.links.map((l) => {
+        const m = l.match(URL_RE);
+        return m ? { label: guessLinkLabel(m[0]), url: m[0].startsWith("http") ? m[0] : "https://" + m[0] } : null;
+      }).filter(Boolean)
+    );
+  }
+  log(`Found ${data.education.length} education, ${data.experience.length} experience, ${data.projects.length} project, ${data.achievements.length} achievement entr${data.achievements.length===1?"y":"ies"}, ${data.skills.length} skills.`, "ok");
+  return data;
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  const user = DB.requireAuth();
+  if (!user) return;
+
+  const dropzone = document.getElementById("dropzone");
+  const fileInput = document.getElementById("fileInput");
+  const chooseBtn = document.getElementById("chooseBtn");
+  const progressBar = document.getElementById("progressBar");
+  const progressFill = progressBar.querySelector("i");
+  const logBox = document.getElementById("parseLog");
+  const continueRow = document.getElementById("continueRow");
+  const title = document.getElementById("uploaderTitle");
+  const sub = document.getElementById("uploaderSub");
+
+  function log(msg, cls) {
+    logBox.classList.add("show");
+    const div = document.createElement("div");
+    if (cls) div.className = cls;
+    div.textContent = msg;
+    logBox.appendChild(div);
+    logBox.scrollTop = logBox.scrollHeight;
+  }
+  function setProgress(pct) {
+    progressBar.classList.add("show");
+    progressFill.style.width = pct + "%";
+  }
+
+  chooseBtn.addEventListener("click", () => fileInput.click());
+  dropzone.addEventListener("click", (e) => { if (e.target === dropzone) fileInput.click(); });
+  ["dragenter", "dragover"].forEach((evt) =>
+    dropzone.addEventListener(evt, (e) => { e.preventDefault(); dropzone.classList.add("drag"); })
+  );
+  ["dragleave", "drop"].forEach((evt) =>
+    dropzone.addEventListener(evt, (e) => { e.preventDefault(); dropzone.classList.remove("drag"); })
+  );
+  dropzone.addEventListener("drop", (e) => {
+    const file = e.dataTransfer.files[0];
+    if (file) handleFile(file);
+  });
+  fileInput.addEventListener("change", () => {
+    if (fileInput.files[0]) handleFile(fileInput.files[0]);
+  });
+
+  document.getElementById("skipBtn").addEventListener("click", () => {
+    window.location.href = "editor.html";
+  });
+
+  async function handleFile(file) {
+    title.textContent = file.name;
+    sub.textContent = "Reading file…";
+    logBox.innerHTML = "";
+    setProgress(15);
+    log(`Selected "${file.name}" (${(file.size / 1024).toFixed(0)} KB).`, "");
+
+    const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+    if (!isPdf) {
+      setProgress(100);
+      log(`Automatic extraction currently supports PDF only. Loading a blank draft with your file name as a placeholder — fill in the rest in the editor.`, "warn");
+      const data = mockExtractedData(file.name);
+      DB.saveDraft(user.email, data);
+      finish();
+      return;
+    }
+
+    try {
+      setProgress(40);
+      const data = await parseResume(file, log);
+      setProgress(85);
+      if (!data.personal.name) data.personal.name = user.name;
+      DB.saveDraft(user.email, data);
+      setProgress(100);
+      log(`Done — nothing was sent anywhere, this all happened in your browser.`, "ok");
+      finish();
+    } catch (err) {
+      log(`Couldn't fully parse this file (${err.message}). Loading a blank draft instead — you can fill sections in manually.`, "warn");
+      const data = mockExtractedData(file.name);
+      data.personal.name = user.name;
+      DB.saveDraft(user.email, data);
+      setProgress(100);
+      finish();
+    }
+  }
+
+  function finish() {
+    sub.textContent = "Extraction finished — review it in the editor.";
+    continueRow.classList.remove("hidden");
+  }
+});
+
+
+================================================================================
+FILE: resume-portfolio-site/login.html
+================================================================================
+
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Log in — Portfolio, Unfolded</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;0,600;1,500&family=Space+Grotesk:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="wrap">
+    <a href="index.html" class="brand"><span class="fold"></span>Portfolio, Unfolded</a>
+    <div class="nav-links"><a href="index.html">Home</a></div>
+    <div class="nav-cta"><a href="signup.html" class="btn btn-primary btn-sm">Get started</a></div>
+    <button class="nav-toggle" aria-label="Toggle menu">☰</button>
+  </div>
+</nav>
+
+<div class="auth-shell">
+  <div class="auth-card">
+    <p class="field-tag">FIELD_ACCT — RETURNING</p>
+    <h2 class="mt-8">Welcome back</h2>
+    <p>Log in to keep working on your portfolio.</p>
+
+    <div class="form-error" id="formError"></div>
+
+    <form id="loginForm">
+      <div class="field">
+        <label for="email">Email</label>
+        <input type="email" id="email" required placeholder="you@example.com" />
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input type="password" id="password" required placeholder="Your password" />
+      </div>
+      <button type="submit" class="btn btn-primary btn-block">Log in →</button>
+    </form>
+
+    <p class="auth-switch">New here? <a href="signup.html">Create an account</a></p>
+  </div>
+</div>
+
+<script src="js/storage.js"></script>
+<script src="js/nav.js"></script>
+<script src="js/auth.js"></script>
+</body>
+</html>
+
+
+================================================================================
+FILE: resume-portfolio-site/portfolio.html
+================================================================================
+
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Portfolio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;0,600;1,500&family=Space+Grotesk:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="pf-page" id="pfPage">
+  <div class="pf-wrap" id="pfWrap">
+    <!-- filled by js/portfolio.js -->
+  </div>
+</div>
+
+<script src="js/storage.js"></script>
+<script src="js/portfolio.js"></script>
+</body>
+</html>
+
+
+================================================================================
+FILE: resume-portfolio-site/signup.html
+================================================================================
+
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Create your account — Portfolio, Unfolded</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;0,600;1,500&family=Space+Grotesk:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="wrap">
+    <a href="index.html" class="brand"><span class="fold"></span>Portfolio, Unfolded</a>
+    <div class="nav-links"><a href="index.html">Home</a></div>
+    <div class="nav-cta"><a href="login.html" class="btn btn-ghost btn-sm">Log in</a></div>
+    <button class="nav-toggle" aria-label="Toggle menu">☰</button>
+  </div>
+</nav>
+
+<div class="auth-shell">
+  <div class="auth-card">
+    <p class="field-tag">FIELD_ACCT — NEW</p>
+    <h2 class="mt-8">Create your account</h2>
+    <p>A place to keep your draft and your published link.</p>
+
+    <div class="form-error" id="formError"></div>
+
+    <form id="signupForm">
+      <div class="field">
+        <label for="name">Full name</label>
+        <input type="text" id="name" required placeholder="Jordan Lee" />
+      </div>
+      <div class="field">
+        <label for="email">Email</label>
+        <input type="email" id="email" required placeholder="you@example.com" />
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input type="password" id="password" required minlength="6" placeholder="At least 6 characters" />
+        <p class="field-hint">Stored locally in your browser for this demo — don't reuse a real password.</p>
+      </div>
+      <button type="submit" class="btn btn-primary btn-block">Create account →</button>
+    </form>
+
+    <p class="auth-switch">Already have an account? <a href="login.html">Log in</a></p>
+  </div>
+</div>
+
+<script src="js/storage.js"></script>
+<script src="js/nav.js"></script>
+<script src="js/auth.js"></script>
+</body>
+</html>
+
+
+================================================================================
+FILE: resume-portfolio-site/upload.html
+================================================================================
+
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Upload your resume — Portfolio, Unfolded</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;0,600;1,500&family=Space+Grotesk:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<nav class="site-nav">
+  <div class="wrap">
+    <a href="index.html" class="brand"><span class="fold"></span>Portfolio, Unfolded</a>
+    <div class="nav-links">
+      <a href="dashboard.html">Dashboard</a>
+      <a href="upload.html">Upload</a>
+      <a href="editor.html">Editor</a>
+    </div>
+    <div class="nav-cta"><button class="btn btn-ghost btn-sm" data-logout>Log out</button></div>
+    <button class="nav-toggle" aria-label="Toggle menu">☰</button>
+  </div>
+</nav>
+
+<main class="app-shell">
+  <div class="wrap" style="max-width:760px;">
+    <div class="app-head">
+      <div>
+        <p class="eyebrow">STEP_01 — UPLOAD</p>
+        <h1>Bring in your resume</h1>
+        <p>PDF works best. We read the text right here in your browser — the file never leaves your device.</p>
+      </div>
+    </div>
+
+    <div class="uploader" id="dropzone">
+      <div class="doc-icon" aria-hidden="true"></div>
+      <h3 id="uploaderTitle">Drop your resume here</h3>
+      <p id="uploaderSub">or choose a file — PDF supported for automatic extraction</p>
+      <input type="file" id="fileInput" accept="application/pdf,.pdf" />
+      <button type="button" class="btn btn-primary" id="chooseBtn">Choose file →</button>
+    </div>
+
+    <div class="progress-bar" id="progressBar"><i></i></div>
+    <div class="parse-log" id="parseLog"></div>
+
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:26px; flex-wrap:wrap; gap:12px;">
+      <span class="field-tag">Prefer to start from a blank slate?</span>
+      <button type="button" class="btn btn-ghost btn-sm" id="skipBtn">Skip to manual editor →</button>
+    </div>
+
+    <div id="continueRow" class="hidden" style="margin-top:10px; text-align:right;">
+      <a href="editor.html" class="btn btn-signal">Review in editor →</a>
+    </div>
+  </div>
+</main>
+
+<script type="module">
+  // pdf.js 4.x on cdnjs ships as an ES module — import it here and
+  // hang it on window so the plain classic script upload.js can use it.
+  import * as pdfjsLib from "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.mjs";
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs";
+  window.pdfjsLib = pdfjsLib;
+</script>
+<script src="js/storage.js"></script>
+<script src="js/nav.js"></script>
+<script src="js/upload.js"></script>
+</body>
+</html>
+
+
