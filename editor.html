@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Edit your portfolio</title>
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="brand">resume<span>.</span>live</div>
+  <div><a class="nav-link" href="index.html">← Start over</a></div>
+</nav>
+
+<div class="editor-shell">
+  <h1>Review &amp; edit</h1>
+  <p class="section-sub">We extracted this from your resume — fix anything that's off, add what's missing, and reorder entries with the arrows.</p>
+
+  <div id="editor-root"></div>
+
+  <div class="editor-block">
+    <h2>Layout for your published portfolio</h2>
+    <div class="field-row">
+      <label><input type="radio" name="layout" value="classic" checked /> Classic (paper-styled)</label>
+      <label><input type="radio" name="layout" value="orbit" /> Orbit (dark, modern)</label>
+    </div>
+  </div>
+
+  <div class="editor-sticky-bar">
+    <button class="btn btn-ghost" onclick="window.location.href='index.html'">Cancel</button>
+    <button class="btn btn-primary" id="generate-btn">Generate portfolio →</button>
+  </div>
+</div>
+
+<script type="module" src="js/editor.js"></script>
+</body>
+</html>
